@@ -340,7 +340,7 @@ static void announce(void)
 #ifdef _VCS_REVISION
 	"(" _VCS_REVISION ")\n"
 #endif
-      "========================================\n| Minix 3.4.0rc6 - SO - UNIFESP 1s2025 |\n| Projeto Pratico (I) - Equipe X |\n========================================",
+      "\n========================================\n| Minix 3.4.0rc6 - SO - UNIFESP 1s2025 |\n|    Projeto Pratico (I) - Equipe 1    |\n========================================\n",
       OS_RELEASE);
   printf("MINIX is open source software, see http://www.minix3.org\n");
 }
@@ -357,7 +357,7 @@ void prepare_shutdown(const int how)
    * do shutdown work.  Set a watchog timer to call shutdown(). The timer 
    * argument passes the shutdown status. 
    */
-  printf("=======================================\n| ATE A PROXIMA - SO - UNIFESP 1s2025 |\n| Projeto Pratico (I) - Equipe X |\n=======================================");
+  printf("\n=======================================\n| ATE A PROXIMA - SO - UNIFESP 1s2025 |\n|    Projeto Pratico (I) - Equipe 1    |\n=======================================\n");
   set_kernel_timer(&shutdown_timer, get_monotonic() + system_hz,
       minix_shutdown, how);
 }
