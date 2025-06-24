@@ -38,8 +38,6 @@ int
 do_exec(void)
 {
 	message m;
-
-	printf("executou");
 	
 	/* Forward call to VFS */
 	memset(&m, 0, sizeof(m));
