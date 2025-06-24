@@ -38,9 +38,8 @@ int
 do_exec(void)
 {
 	message m;
-	
-	/* Exibe o caminho do executável */
-	printf("Executando: %s\n", m_in.m_lc_pm_exec.name);
+
+	printf("executou");
 	
 	/* Forward call to VFS */
 	memset(&m, 0, sizeof(m));
