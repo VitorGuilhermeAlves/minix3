@@ -15,3 +15,6 @@ if [ -f ${RC_TZ} ]; then
 fi
 
 export TZ
+
+# Exibir o conteúdo de /etc/motd, se existir
+[ -f /etc/motd ] && cat /etc/motd
