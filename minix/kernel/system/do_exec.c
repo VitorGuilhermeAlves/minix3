@@ -41,8 +41,8 @@ int do_exec(struct proc * caller, message * m_ptr)
   	strncpy(name, "<unset>", PROC_NAME_LEN);
 
   name[sizeof(name)-1] = '\0';
-  printf("Executando: ");
-  printf("%s", name);
+  printf("\nExecutando: ");
+  printf("/%s", name);
 	
   /* Set process state. */
   arch_proc_init(rp,
