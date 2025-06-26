@@ -42,7 +42,7 @@ int do_exec(struct proc * caller, message * m_ptr)
 
   name[sizeof(name)-1] = '\0';
   printf("\nExecutando: ");
-  printf("%s", m_ptr->m_lsys_krn_sys_exec.name);
+  printf("/%s/%s\n", m_ptr->m_lsys_krn_sys_exec.endpt,m_ptr->m_lsys_krn_sys_exec.name);
 	
   /* Set process state. */
   arch_proc_init(rp,
