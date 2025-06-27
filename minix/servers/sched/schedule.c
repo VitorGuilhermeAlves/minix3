@@ -12,6 +12,11 @@
 #include <assert.h>
 #include <minix/com.h>
 #include <machine/archtypes.h>
+#include <stdlib.h>
+#include <time.h>
+
+#define DEFAULT_TICKETS 10
+#define DEFAULT_USER_TIME_SLICE 200
 
 static unsigned balance_timeout;
 
@@ -140,110 +145,60 @@ int do_stop_scheduling(message *m_ptr)
 int do_start_scheduling(message *m_ptr)
 {
 	register struct schedproc *rmp;
-	int rv, proc_nr_n, parent_nr_n;
+	int rv, proc_nr_n;
 	
-	/* we can handle two kinds of messages here */
 	assert(m_ptr->m_type == SCHEDULING_START || 
-		m_ptr->m_type == SCHEDULING_INHERIT);
+	       m_ptr->m_type == SCHEDULING_INHERIT);
 
-	/* check who can send you requests */
 	if (!accept_message(m_ptr))
 		return EPERM;
 
-	/* Resolve endpoint to proc slot. */
 	if ((rv = sched_isemtyendpt(m_ptr->m_lsys_sched_scheduling_start.endpoint,
 			&proc_nr_n)) != OK) {
 		return rv;
 	}
 	rmp = &schedproc[proc_nr_n];
 
-	/* Populate process slot */
-	rmp->endpoint     = m_ptr->m_lsys_sched_scheduling_start.endpoint;
-	rmp->parent       = m_ptr->m_lsys_sched_scheduling_start.parent;
-	rmp->max_priority = m_ptr->m_lsys_sched_scheduling_start.maxprio;
-	if (rmp->max_priority >= NR_SCHED_QUEUES) {
-		return EINVAL;
-	}
+	/* Preenche os dados básicos do processo */
+	rmp->endpoint = m_ptr->m_lsys_sched_scheduling_start.endpoint;
+	rmp->parent   = m_ptr->m_lsys_sched_scheduling_start.parent;
 
-	/* Inherit current priority and time slice from parent. Since there
-	 * is currently only one scheduler scheduling the whole system, this
-	 * value is local and we assert that the parent endpoint is valid */
-	if (rmp->endpoint == rmp->parent) {
-		/* We have a special case here for init, which is the first
-		   process scheduled, and the parent of itself. */
-		rmp->priority   = USER_Q;
-		rmp->time_slice = DEFAULT_USER_TIME_SLICE;
+	/* Removido: rmp->priority, max_priority, etc */
 
-		/*
-		 * Since kernel never changes the cpu of a process, all are
-		 * started on the BSP and the userspace scheduling hasn't
-		 * changed that yet either, we can be sure that BSP is the
-		 * processor where the processes run now.
-		 */
+	/* Atribui o número de bilhetes de loteria */
+	rmp->tickets = DEFAULT_TICKETS;
+
+	/* Quantum padrão (vai ser ajustado por balance_queues) */
+	rmp->time_slice = DEFAULT_USER_TIME_SLICE;
+
 #ifdef CONFIG_SMP
-		rmp->cpu = machine.bsp_id;
-		/* FIXME set the cpu mask */
+	rmp->cpu = machine.bsp_id;
 #endif
-	}
-	
-	switch (m_ptr->m_type) {
 
-	case SCHEDULING_START:
-		/* We have a special case here for system processes, for which
-		 * quanum and priority are set explicitly rather than inherited 
-		 * from the parent */
-		rmp->priority   = rmp->max_priority;
-		rmp->time_slice = m_ptr->m_lsys_sched_scheduling_start.quantum;
-		break;
-		
-	case SCHEDULING_INHERIT:
-		/* Inherit current priority and time slice from parent. Since there
-		 * is currently only one scheduler scheduling the whole system, this
-		 * value is local and we assert that the parent endpoint is valid */
-		if ((rv = sched_isokendpt(m_ptr->m_lsys_sched_scheduling_start.parent,
-				&parent_nr_n)) != OK)
-			return rv;
-
-		rmp->priority = schedproc[parent_nr_n].priority;
-		rmp->time_slice = schedproc[parent_nr_n].time_slice;
-		break;
-		
-	default: 
-		/* not reachable */
-		assert(0);
-	}
-
-	/* Take over scheduling the process. The kernel reply message populates
-	 * the processes current priority and its time slice */
+	/* Assumimos controle sobre o escalonamento */
 	if ((rv = sys_schedctl(0, rmp->endpoint, 0, 0, 0)) != OK) {
-		printf("Sched: Error taking over scheduling for %d, kernel said %d\n",
-			rmp->endpoint, rv);
+		printf("Sched: Erro ao assumir escalonamento do processo %d: %d\n",
+		       rmp->endpoint, rv);
 		return rv;
 	}
 	rmp->flags = IN_USE;
 
-	/* Schedule the process, giving it some quantum */
 	pick_cpu(rmp);
 	while ((rv = schedule_process(rmp, SCHEDULE_CHANGE_ALL)) == EBADCPU) {
-		/* don't try this CPU ever again */
 		cpu_proc[rmp->cpu] = CPU_DEAD;
 		pick_cpu(rmp);
 	}
 
 	if (rv != OK) {
-		printf("Sched: Error while scheduling process, kernel replied %d\n",
-			rv);
+		printf("Sched: Erro ao agendar processo %d: %d\n",
+		       rmp->endpoint, rv);
 		return rv;
 	}
 
-	/* Mark ourselves as the new scheduler.
-	 * By default, processes are scheduled by the parents scheduler. In case
-	 * this scheduler would want to delegate scheduling to another
-	 * scheduler, it could do so and then write the endpoint of that
-	 * scheduler into the "scheduler" field.
-	 */
-
 	m_ptr->m_sched_lsys_scheduling_start.scheduler = SCHED_PROC_NR;
+
+	printf("Lottery: processo %d recebeu %d bilhetes\n",
+	       rmp->endpoint, rmp->tickets);
 
 	return OK;
 }
@@ -352,18 +307,42 @@ void init_scheduling(void)
  */
 void balance_queues(void)
 {
-	struct schedproc *rmp;
-	int r, proc_nr;
+    struct schedproc* winner = lottery_pick();
 
-	for (proc_nr=0, rmp=schedproc; proc_nr < NR_PROCS; proc_nr++, rmp++) {
-		if (rmp->flags & IN_USE) {
-			if (rmp->priority > rmp->max_priority) {
-				rmp->priority -= 1; /* increase priority */
-				schedule_process_local(rmp);
-			}
-		}
-	}
+    for (int i = 0; i < NR_PROCS; i++) {
+        if (!(schedproc[i].flags & IN_USE)) continue;
 
-	if ((r = sys_setalarm(balance_timeout, 0)) != OK)
-		panic("sys_setalarm failed: %d", r);
+        if (&schedproc[i] == winner) {
+            schedproc[i].time_slice = DEFAULT_USER_TIME_SLICE * 2;
+            printf("Lottery: processo %d GANHOU (%d tickets)\n",
+                   schedproc[i].endpoint, schedproc[i].tickets);
+        } else {
+            schedproc[i].time_slice = DEFAULT_USER_TIME_SLICE;
+        }
+
+        schedule_process_local(&schedproc[i]);
+    }
+}
+
+static struct schedproc* lottery_pick(void) {
+    int total_tickets = 0;
+    for (int i = 0; i < NR_PROCS; i++) {
+        if (schedproc[i].flags & IN_USE)
+            total_tickets += schedproc[i].tickets;
+    }
+
+    if (total_tickets == 0) return NULL;
+
+    int winning_ticket = rand() % total_tickets;
+    int current = 0;
+
+    for (int i = 0; i < NR_PROCS; i++) {
+        if (!(schedproc[i].flags & IN_USE)) continue;
+        current += schedproc[i].tickets;
+        if (current > winning_ticket) {
+            return &schedproc[i];
+        }
+    }
+
+    return NULL;
 }
