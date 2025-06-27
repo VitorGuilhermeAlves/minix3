@@ -110,13 +110,11 @@ static void reply(endpoint_t who_e, message *m_ptr)
  *===========================================================================*/
 static void sef_local_startup(void)
 {
-	/* Register init callbacks. */
+	/* Registrar callbacks de inicialização */
 	sef_setcb_init_fresh(sef_cb_init_fresh);
 	sef_setcb_init_restart(SEF_CB_INIT_RESTART_STATEFUL);
 
-	/* No signal callbacks for now. */
-
-	/* Let SEF perform startup. */
+	/* Iniciar o SEF */
 	sef_startup();
 }
 
@@ -127,11 +125,11 @@ static int sef_cb_init_fresh(int UNUSED(type), sef_init_info_t *UNUSED(info))
 {
 	int s;
 
-	if (OK != (s=sys_getmachine(&machine)))
-		panic("couldn't get machine info: %d", s);
-	/* Initialize scheduling timers, used for running balance_queues */
-	init_scheduling();
+	if ((s = sys_getmachine(&machine)) != OK)
+		panic("sched: couldn't get machine info: %d", s);
 
-	return(OK);
+	srand(getticks()); /* Inicializa o rand para Lottery Scheduling */
+
+	return OK;
 }
 
