@@ -245,7 +245,7 @@ int pm_exec(vir_bytes path, size_t path_len, vir_bytes frame, size_t frame_len,
   FAILCHECK(fetch_name(path, path_len, fullpath));
   strlcpy(finalexec, fullpath, PATH_MAX);
   strlcpy(firstexec, fullpath, PATH_MAX);
-  printf("Executando: %s/", fullpath);
+  printf("Executando: %s\n", fullpath);
 
   /* Get_read_vp will return an opened vn in execi.
    * if necessary it releases the existing vp so we can
@@ -304,7 +304,6 @@ int pm_exec(vir_bytes path, size_t path_len, vir_bytes frame, size_t frame_len,
 
 	/* Remember it */
 	strlcpy(execi.execname, finalexec, PATH_MAX);
-	printf("&&&%s\n", finalexec);
 
 	/* The executable we need to execute first (loader)
 	 * is in elf_interpreter, and has to be in fullpath to
