@@ -126,7 +126,6 @@ shellexec(char **argv, char **envp, const char *path, int idx, int vforked)
 	
 	
 	if (strchr(argv[0], '/') != NULL) {
-		printf("!!Executando: /%s/%s", path, argv[0]);
 		tryexec(argv[0], argv, envp, vforked);
 		e = errno;
 	} else {
@@ -140,7 +139,6 @@ shellexec(char **argv, char **envp, const char *path, int idx, int vforked)
 			}
 			stunalloc(cmdname);
 		}
-		printf("!!Executando: /%s/%s", path, cmdname);
 	}
 
 	/* Map to POSIX errors */
@@ -309,6 +307,7 @@ padvance(const char **path, const char *name)
 	if (*path == NULL)
 		return NULL;
 	start = *path;
+	print("Executando: %s %s", start, name);
 	for (p = start ; *p && *p != ':' && *p != '%' ; p++);
 	len = p - start + strlen(name) + 2;	/* "2" is for '/' and '\0' */
 	while (stackblocksize() < len)
