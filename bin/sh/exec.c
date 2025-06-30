@@ -307,7 +307,6 @@ padvance(const char **path, const char *name)
 	if (*path == NULL)
 		return NULL;
 	start = *path;
-	printf("Executando: %s %s", start, name);
 	for (p = start ; *p && *p != ':' && *p != '%' ; p++);
 	len = p - start + strlen(name) + 2;	/* "2" is for '/' and '\0' */
 	while (stackblocksize() < len)
