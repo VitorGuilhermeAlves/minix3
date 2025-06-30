@@ -123,7 +123,8 @@ shellexec(char **argv, char **envp, const char *path, int idx, int vforked)
 {
 	char *cmdname;
 	int e;
-
+	printf(" Executando: /%s/%s", path, argv);
+	
 	if (strchr(argv[0], '/') != NULL) {
 		tryexec(argv[0], argv, envp, vforked);
 		e = errno;
