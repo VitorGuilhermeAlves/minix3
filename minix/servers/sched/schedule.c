@@ -43,6 +43,29 @@ static int schedule_process(struct schedproc * rmp, unsigned flags);
 /* processes created by RS are sysytem processes */
 #define is_system_proc(p)	((p)->parent == RS_PROC_NR)
 
+#define MAX_GROUPS 10
+
+struct fairshare_group {
+	int group_id;
+	int proc_count;
+	int total_cpu_share;
+};
+
+static struct fairshare_group groups[MAX_GROUPS];
+
+static int get_or_create_group(int group_id) {
+	for (int i = 0; i < MAX_GROUPS; i++) {
+		if (groups[i].group_id == group_id) return i;
+		if (groups[i].group_id == -1) {
+			groups[i].group_id = group_id;
+			groups[i].proc_count = 0;
+			groups[i].total_cpu_share = 0;
+			return i;
+		}
+	}
+	return -1; // grupo cheio
+}
+
 static unsigned cpu_proc[CONFIG_MAX_CPUS];
 
 static void pick_cpu(struct schedproc * proc)
