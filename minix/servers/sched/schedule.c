@@ -137,14 +137,13 @@ int do_stop_scheduling(message *m_ptr)
 	register struct schedproc *rmp;
 	int proc_nr_n;
 
-	/* check who can send you requests */
 	if (!accept_message(m_ptr))
 		return EPERM;
 
 	if (sched_isokendpt(m_ptr->m_lsys_sched_scheduling_stop.endpoint,
-		    &proc_nr_n) != OK) {
-		printf("SCHED: WARNING: got an invalid endpoint in OOQ msg "
-		"%d\n", m_ptr->m_lsys_sched_scheduling_stop.endpoint);
+			&proc_nr_n) != OK) {
+		printf("SCHED: WARNING: got an invalid endpoint in OOQ msg %d\n",
+			m_ptr->m_lsys_sched_scheduling_stop.endpoint);
 		return EBADEPT;
 	}
 
@@ -152,8 +151,12 @@ int do_stop_scheduling(message *m_ptr)
 #ifdef CONFIG_SMP
 	cpu_proc[rmp->cpu]--;
 #endif
-	rmp->flags = 0; /*&= ~IN_USE;*/
 
+	int group_idx = get_or_create_group(rmp->group_id);
+	if (group_idx >= 0)
+		groups[group_idx].proc_count--;
+
+	rmp->flags = 0;
 	return OK;
 }
 
@@ -164,23 +167,19 @@ int do_start_scheduling(message *m_ptr)
 {
 	register struct schedproc *rmp;
 	int rv, proc_nr_n, parent_nr_n;
-	
-	/* we can handle two kinds of messages here */
+
 	assert(m_ptr->m_type == SCHEDULING_START || 
 		m_ptr->m_type == SCHEDULING_INHERIT);
 
-	/* check who can send you requests */
 	if (!accept_message(m_ptr))
 		return EPERM;
 
-	/* Resolve endpoint to proc slot. */
 	if ((rv = sched_isemtyendpt(m_ptr->m_lsys_sched_scheduling_start.endpoint,
 			&proc_nr_n)) != OK) {
 		return rv;
 	}
 	rmp = &schedproc[proc_nr_n];
 
-	/* Populate process slot */
 	rmp->endpoint     = m_ptr->m_lsys_sched_scheduling_start.endpoint;
 	rmp->parent       = m_ptr->m_lsys_sched_scheduling_start.parent;
 	rmp->max_priority = m_ptr->m_lsys_sched_scheduling_start.maxprio;
@@ -188,56 +187,36 @@ int do_start_scheduling(message *m_ptr)
 		return EINVAL;
 	}
 
-	/* Inherit current priority and time slice from parent. Since there
-	 * is currently only one scheduler scheduling the whole system, this
-	 * value is local and we assert that the parent endpoint is valid */
 	if (rmp->endpoint == rmp->parent) {
-		/* We have a special case here for init, which is the first
-		   process scheduled, and the parent of itself. */
 		rmp->priority   = USER_Q;
 		rmp->time_slice = DEFAULT_USER_TIME_SLICE;
-
-		/*
-		 * Since kernel never changes the cpu of a process, all are
-		 * started on the BSP and the userspace scheduling hasn't
-		 * changed that yet either, we can be sure that BSP is the
-		 * processor where the processes run now.
-		 */
 #ifdef CONFIG_SMP
 		rmp->cpu = machine.bsp_id;
-		/* FIXME set the cpu mask */
 #endif
 	}
-	
-	switch (m_ptr->m_type) {
 
+	switch (m_ptr->m_type) {
 	case SCHEDULING_START:
-		/* We have a special case here for system processes, for which
-		 * quanum and priority are set explicitly rather than inherited 
-		 * from the parent */
 		rmp->priority   = rmp->max_priority;
 		rmp->time_slice = m_ptr->m_lsys_sched_scheduling_start.quantum;
 		break;
-		
 	case SCHEDULING_INHERIT:
-		/* Inherit current priority and time slice from parent. Since there
-		 * is currently only one scheduler scheduling the whole system, this
-		 * value is local and we assert that the parent endpoint is valid */
 		if ((rv = sched_isokendpt(m_ptr->m_lsys_sched_scheduling_start.parent,
 				&parent_nr_n)) != OK)
 			return rv;
-
 		rmp->priority = schedproc[parent_nr_n].priority;
 		rmp->time_slice = schedproc[parent_nr_n].time_slice;
 		break;
-		
 	default: 
-		/* not reachable */
 		assert(0);
 	}
 
-	/* Take over scheduling the process. The kernel reply message populates
-	 * the processes current priority and its time slice */
+	// FAIR-SHARE: define grupo
+	rmp->group_id = m_ptr->m_lsys_sched_scheduling_start.group;
+	int group_idx = get_or_create_group(rmp->group_id);
+	if (group_idx >= 0)
+		groups[group_idx].proc_count++;
+
 	if ((rv = sys_schedctl(0, rmp->endpoint, 0, 0, 0)) != OK) {
 		printf("Sched: Error taking over scheduling for %d, kernel said %d\n",
 			rmp->endpoint, rv);
@@ -245,10 +224,8 @@ int do_start_scheduling(message *m_ptr)
 	}
 	rmp->flags = IN_USE;
 
-	/* Schedule the process, giving it some quantum */
 	pick_cpu(rmp);
 	while ((rv = schedule_process(rmp, SCHEDULE_CHANGE_ALL)) == EBADCPU) {
-		/* don't try this CPU ever again */
 		cpu_proc[rmp->cpu] = CPU_DEAD;
 		pick_cpu(rmp);
 	}
@@ -259,15 +236,7 @@ int do_start_scheduling(message *m_ptr)
 		return rv;
 	}
 
-	/* Mark ourselves as the new scheduler.
-	 * By default, processes are scheduled by the parents scheduler. In case
-	 * this scheduler would want to delegate scheduling to another
-	 * scheduler, it could do so and then write the endpoint of that
-	 * scheduler into the "scheduler" field.
-	 */
-
 	m_ptr->m_sched_lsys_scheduling_start.scheduler = SCHED_PROC_NR;
-
 	return OK;
 }
 
@@ -319,35 +288,23 @@ int do_nice(message *m_ptr)
  *===========================================================================*/
 static int schedule_process(struct schedproc * rmp, unsigned flags)
 {
+	{
 	int err;
-	int new_prio, new_quantum, new_cpu, niced;
 
-	pick_cpu(rmp);
-
-	if (flags & SCHEDULE_CHANGE_PRIO)
-		new_prio = rmp->priority;
-	else
-		new_prio = -1;
-
-	if (flags & SCHEDULE_CHANGE_QUANTUM)
-		new_quantum = rmp->time_slice;
-	else
-		new_quantum = -1;
-
-	if (flags & SCHEDULE_CHANGE_CPU)
-		new_cpu = rmp->cpu;
-	else
-		new_cpu = -1;
-
-	niced = (rmp->max_priority > USER_Q);
-
-	if ((err = sys_schedule(rmp->endpoint, new_prio,
-		new_quantum, new_cpu, niced)) != OK) {
-		printf("PM: An error occurred when trying to schedule %d: %d\n",
-		rmp->endpoint, err);
+	int group_idx = get_or_create_group(rmp->group_id);
+	if (group_idx >= 0 && groups[group_idx].proc_count > 0) {
+		rmp->time_slice = DEFAULT_USER_TIME_SLICE / groups[group_idx].proc_count;
+	} else {
+		rmp->time_slice = DEFAULT_USER_TIME_SLICE;
 	}
 
+	if ((err = sys_schedule(rmp->endpoint, rmp->priority,
+		rmp->time_slice, rmp->cpu, flags)) != OK) {
+		printf("schedule_process: sys_schedule failed for %d: %d\n",
+			rmp->endpoint, err);
+	}
 	return err;
+}
 }
 
 
@@ -356,6 +313,12 @@ static int schedule_process(struct schedproc * rmp, unsigned flags)
  *===========================================================================*/
 void init_scheduling(void)
 {
+	for (int i = 0; i < MAX_GROUPS; i++) {
+		groups[i].group_id = -1;
+		groups[i].proc_count = 0;
+		groups[i].total_cpu_share = 0;
+	}
+	
 	int r;
 
 	balance_timeout = BALANCE_TIMEOUT * sys_hz();
