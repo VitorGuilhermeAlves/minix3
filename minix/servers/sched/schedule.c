@@ -63,7 +63,7 @@ static int get_or_create_group(int group_id) {
 			return i;
 		}
 	}
-	return -1; // grupo cheio
+	return -1;
 }
 
 static unsigned cpu_proc[CONFIG_MAX_CPUS];
