@@ -40,6 +40,8 @@ static int schedule_process(struct schedproc * rmp, unsigned flags);
 
 #define DEFAULT_USER_TIME_SLICE 200
 
+#define MAX_USER_Q (NR_SCHED_QUEUES - 1)
+
 /* processes created by RS are sysytem processes */
 #define is_system_proc(p)	((p)->parent == RS_PROC_NR)
 
