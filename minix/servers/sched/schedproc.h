@@ -30,9 +30,8 @@ EXTERN struct schedproc {
 	unsigned priority;		/* the process' current priority */
 	unsigned time_slice;		/* this process's time slice */
 	unsigned cpu;		/* what CPU is the process running on */
-	bitchunk_t cpu_mask[BITMAP_CHUNKS(CONFIG_MAX_CPUS)]; /* what CPUs is the
-								process allowed
-								to run on */
+	bitchunk_t cpu_mask[BITMAP_CHUNKS(CONFIG_MAX_CPUS)];
+	unsigned period_ms;     /* período da tarefa em milissegundos */
 } schedproc[NR_PROCS];
 
 /* Flag values */
