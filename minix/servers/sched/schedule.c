@@ -139,58 +139,112 @@ int do_stop_scheduling(message *m_ptr)
  *===========================================================================*/
 int do_start_scheduling(message *m_ptr)
 {
-	struct schedproc *rmp;
+	register struct schedproc *rmp;
 	int rv, proc_nr_n, parent_nr_n;
+	
+	/* we can handle two kinds of messages here */
+	assert(m_ptr->m_type == SCHEDULING_START || 
+		m_ptr->m_type == SCHEDULING_INHERIT);
 
+	/* check who can send you requests */
 	if (!accept_message(m_ptr))
 		return EPERM;
 
+	/* Resolve endpoint to proc slot. */
 	if ((rv = sched_isemtyendpt(m_ptr->m_lsys_sched_scheduling_start.endpoint,
-		&proc_nr_n)) != OK) {
+			&proc_nr_n)) != OK) {
 		return rv;
 	}
-
 	rmp = &schedproc[proc_nr_n];
+
+	/* Populate process slot */
 	rmp->endpoint     = m_ptr->m_lsys_sched_scheduling_start.endpoint;
 	rmp->parent       = m_ptr->m_lsys_sched_scheduling_start.parent;
 	rmp->max_priority = m_ptr->m_lsys_sched_scheduling_start.maxprio;
-	
-	rmp->tickets = MAX(1, m_ptr->m_lsys_sched_scheduling_start.priority);
-	
-	int max_tickets = 100;
-	int prio_range = MAX_USER_Q - USER_Q + 1;
-	int ticket_ratio = (max_tickets / rmp->tickets);
+	if (rmp->max_priority >= NR_SCHED_QUEUES) {
+		return EINVAL;
+	}
 
-	int new_prio = USER_Q + (ticket_ratio % prio_range);
-	if (new_prio > MAX_USER_Q) new_prio = MAX_USER_Q;
+	/* Inherit current priority and time slice from parent. Since there
+	 * is currently only one scheduler scheduling the whole system, this
+	 * value is local and we assert that the parent endpoint is valid */
+	if (rmp->endpoint == rmp->parent) {
+		/* We have a special case here for init, which is the first
+		   process scheduled, and the parent of itself. */
+		rmp->priority   = USER_Q;
+		rmp->time_slice = DEFAULT_USER_TIME_SLICE;
 
-	rmp->priority = new_prio;
-	rmp->time_slice = m_ptr->m_lsys_sched_scheduling_start.quantum;
-
+		/*
+		 * Since kernel never changes the cpu of a process, all are
+		 * started on the BSP and the userspace scheduling hasn't
+		 * changed that yet either, we can be sure that BSP is the
+		 * processor where the processes run now.
+		 */
 #ifdef CONFIG_SMP
-	rmp->cpu = machine.bsp_id;
+		rmp->cpu = machine.bsp_id;
+		/* FIXME set the cpu mask */
 #endif
+	}
+	
+	switch (m_ptr->m_type) {
 
+	case SCHEDULING_START:
+		/* We have a special case here for system processes, for which
+		 * quanum and priority are set explicitly rather than inherited 
+		 * from the parent */
+		rmp->priority   = rmp->max_priority;
+		rmp->time_slice = m_ptr->m_lsys_sched_scheduling_start.quantum;
+		break;
+		
+	case SCHEDULING_INHERIT:
+		/* Inherit current priority and time slice from parent. Since there
+		 * is currently only one scheduler scheduling the whole system, this
+		 * value is local and we assert that the parent endpoint is valid */
+		if ((rv = sched_isokendpt(m_ptr->m_lsys_sched_scheduling_start.parent,
+				&parent_nr_n)) != OK)
+			return rv;
+
+		rmp->priority = schedproc[parent_nr_n].priority;
+		rmp->time_slice = schedproc[parent_nr_n].time_slice;
+		break;
+		
+	default: 
+		/* not reachable */
+		assert(0);
+	}
+
+	/* Take over scheduling the process. The kernel reply message populates
+	 * the processes current priority and its time slice */
 	if ((rv = sys_schedctl(0, rmp->endpoint, 0, 0, 0)) != OK) {
 		printf("Sched: Error taking over scheduling for %d, kernel said %d\n",
 			rmp->endpoint, rv);
 		return rv;
 	}
-
 	rmp->flags = IN_USE;
-	pick_cpu(rmp);
 
+	/* Schedule the process, giving it some quantum */
+	pick_cpu(rmp);
 	while ((rv = schedule_process(rmp, SCHEDULE_CHANGE_ALL)) == EBADCPU) {
+		/* don't try this CPU ever again */
 		cpu_proc[rmp->cpu] = CPU_DEAD;
 		pick_cpu(rmp);
 	}
 
 	if (rv != OK) {
-		printf("Sched: Error scheduling proc %d: %d\n", rmp->endpoint, rv);
+		printf("Sched: Error while scheduling process, kernel replied %d\n",
+			rv);
 		return rv;
 	}
 
+	/* Mark ourselves as the new scheduler.
+	 * By default, processes are scheduled by the parents scheduler. In case
+	 * this scheduler would want to delegate scheduling to another
+	 * scheduler, it could do so and then write the endpoint of that
+	 * scheduler into the "scheduler" field.
+	 */
+
 	m_ptr->m_sched_lsys_scheduling_start.scheduler = SCHED_PROC_NR;
+
 	return OK;
 }
 
