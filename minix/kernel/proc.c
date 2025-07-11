@@ -41,6 +41,10 @@
 
 #include <minix/syslib.h>
 
+#define RAND_MAX	0x7fffffff
+
+static u_long next = 1;
+
 /* Scheduling and message passing functions */
 static void idle(void);
 /**
@@ -1780,6 +1784,14 @@ void dequeue(struct proc *rp)
 }
 
 /*===========================================================================*
+ *				PSEUDO ALEATORIO			     * 
+ *===========================================================================*/
+int rand_c(void)
+{
+  return (int)((next = next * 1103515245 + 12345) % ((u_long)RAND_MAX + 1));
+}
+
+/*===========================================================================*
  *				pick_proc				     * 
  *===========================================================================*/
 static struct proc * pick_proc(void)
@@ -1790,6 +1802,15 @@ static struct proc * pick_proc(void)
  *
  * This function always uses the run queues of the local cpu!
  */
+  int processes_ready[7] = {0};
+  int tickets_in_every_queue[7] = {0};
+
+  int tickets = 0;
+
+  int chosen_ticket, acc_sum = 0, min_ticket_queue = 7;
+
+  int ticket;
+
   register struct proc *rp;			/* process to run */
   struct proc **rdy_head;
   int q;				/* iterate over queues */
@@ -1799,7 +1820,10 @@ static struct proc * pick_proc(void)
    * If there are no processes ready to run, return NULL.
    */
   rdy_head = get_cpulocal_var(run_q_head);
-  for (q=0; q < NR_SCHED_QUEUES; q++) {	
+  for (q=0; q < NR_SCHED_QUEUES; q++) {
+	if(q == 7) {
+		q += 8;
+	}
 	if(!(rp = rdy_head[q])) {
 		TRACE(VF_PICKPROC, printf("cpu %d queue %d empty\n", cpuid, q););
 		continue;
@@ -1808,6 +1832,40 @@ static struct proc * pick_proc(void)
 	if (priv(rp)->s_flags & BILLABLE)	 	
 		get_cpulocal_var(bill_ptr) = rp; /* bill for system time */
 	return rp;
+  }
+
+  for (int i = 0; i <= NR_TASKS + NR_PROCS; i++) {
+  	register struct proc * process = proc[i];
+	if (process->p_priority <= 14 && process->p_priority >= 7){
+		const int priority_queue = process->p_priority;
+		if(proc_is_runnable(process)){
+			processes_ready[7-priority_queue]++;
+		}
+	}
+  }
+
+  for (q = 7; q < 15; q++) {
+  	ticket = (16-q) * processes_ready[7-q];
+	tickets_in_every_queue[7-q] = ticket;
+	tickets += ticket;
+  }
+
+  chosen_ticket = rand_c() % tickets + 1;
+
+  for (q = 7; q < 15; q++){
+	  ticket = tickets_in_every_queue[7-q];
+	  acc_sum += ticket;
+	  if (chosen_ticket <= acc_sum) {
+		  min_ticket_queue = q;
+		  break;
+	  }
+  }
+
+  if ((rp = rdy_head[min_ticket_queue]) && proc_is_runnable(rp)){
+	  if(priv(rp)->s_flags & BILLABE){
+	  	get_cpulocal_var(bill_ptr) = rp;
+	  }
+	  return rp;
   }
   return NULL;
 }
