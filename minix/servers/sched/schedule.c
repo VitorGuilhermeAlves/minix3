@@ -40,8 +40,6 @@ static int schedule_process(struct schedproc * rmp, unsigned flags);
 
 #define DEFAULT_USER_TIME_SLICE 200
 
-#define MAX_USER_Q (NR_SCHED_QUEUES - 1)
-
 /* processes created by RS are sysytem processes */
 #define is_system_proc(p)	((p)->parent == RS_PROC_NR)
 
@@ -141,56 +139,58 @@ int do_stop_scheduling(message *m_ptr)
  *===========================================================================*/
 int do_start_scheduling(message *m_ptr)
 {
-	register struct schedproc *rmp;
+	struct schedproc *rmp;
 	int rv, proc_nr_n, parent_nr_n;
-
-	assert(m_ptr->m_type == SCHEDULING_START || m_ptr->m_type == SCHEDULING_INHERIT);
 
 	if (!accept_message(m_ptr))
 		return EPERM;
 
 	if ((rv = sched_isemtyendpt(m_ptr->m_lsys_sched_scheduling_start.endpoint,
-			&proc_nr_n)) != OK) {
+		&proc_nr_n)) != OK) {
 		return rv;
 	}
-	rmp = &schedproc[proc_nr_n];
 
+	rmp = &schedproc[proc_nr_n];
 	rmp->endpoint     = m_ptr->m_lsys_sched_scheduling_start.endpoint;
 	rmp->parent       = m_ptr->m_lsys_sched_scheduling_start.parent;
 	rmp->max_priority = m_ptr->m_lsys_sched_scheduling_start.maxprio;
-	if (rmp->max_priority >= NR_SCHED_QUEUES)
-		return EINVAL;
+	
+	rmp->tickets = MAX(1, m_ptr->m_lsys_sched_scheduling_start.priority);
+	
+	int max_tickets = 100;
+	int prio_range = MAX_USER_Q - USER_Q + 1;
+	int ticket_ratio = (max_tickets / rmp->tickets);
 
-	/* período é passado no campo `priority`, por limitação da interface atual */
-	rmp->period_ms = MAX(1, m_ptr->m_lsys_sched_scheduling_start.priority);
+	int new_prio = USER_Q + (ticket_ratio % prio_range);
+	if (new_prio > MAX_USER_Q) new_prio = MAX_USER_Q;
 
-	/* menor período => maior prioridade */
-	rmp->priority = USER_Q + (rmp->period_ms / 100); // normaliza prioridade
-	if (rmp->priority > MAX_USER_Q)
-		rmp->priority = MAX_USER_Q;
-
+	rmp->priority = new_prio;
 	rmp->time_slice = m_ptr->m_lsys_sched_scheduling_start.quantum;
+
+#ifdef CONFIG_SMP
+	rmp->cpu = machine.bsp_id;
+#endif
 
 	if ((rv = sys_schedctl(0, rmp->endpoint, 0, 0, 0)) != OK) {
 		printf("Sched: Error taking over scheduling for %d, kernel said %d\n",
 			rmp->endpoint, rv);
 		return rv;
 	}
-	rmp->flags = IN_USE;
 
+	rmp->flags = IN_USE;
 	pick_cpu(rmp);
+
 	while ((rv = schedule_process(rmp, SCHEDULE_CHANGE_ALL)) == EBADCPU) {
 		cpu_proc[rmp->cpu] = CPU_DEAD;
 		pick_cpu(rmp);
 	}
 
 	if (rv != OK) {
-		printf("Sched: Error while scheduling process, kernel replied %d\n", rv);
+		printf("Sched: Error scheduling proc %d: %d\n", rmp->endpoint, rv);
 		return rv;
 	}
 
 	m_ptr->m_sched_lsys_scheduling_start.scheduler = SCHED_PROC_NR;
-
 	return OK;
 }
 
