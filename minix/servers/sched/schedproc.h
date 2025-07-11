@@ -21,17 +21,16 @@
  */
 
 EXTERN struct schedproc {
-	endpoint_t endpoint;	/* process endpoint id */
-	endpoint_t parent;	/* parent endpoint id */
-	unsigned flags;		/* flag bits */
-
-	/* User space scheduling */
-	unsigned max_priority;	/* this process' highest allowed priority */
-	unsigned priority;		/* the process' current priority */
-	unsigned time_slice;		/* this process's time slice */
-	unsigned cpu;		/* what CPU is the process running on */
+	endpoint_t endpoint;	      /* process endpoint id */
+	endpoint_t parent;		      /* parent endpoint id */
+	unsigned flags;		          /* flag bits */
+	unsigned max_priority;	      /* highest allowed priority */
+	unsigned priority;		      /* current priority */
+	unsigned time_slice;	      /* time slice in ticks */
+	unsigned cpu;		          /* CPU the process is running on */
 	bitchunk_t cpu_mask[BITMAP_CHUNKS(CONFIG_MAX_CPUS)];
-	unsigned period_ms;     /* período da tarefa em milissegundos */
+
+	unsigned tickets;             /* 🎟 número de bilhetes (Lottery Scheduling) */
 } schedproc[NR_PROCS];
 
 /* Flag values */
