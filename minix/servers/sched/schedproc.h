@@ -30,7 +30,7 @@ EXTERN struct schedproc {
 	unsigned cpu;		          /* CPU the process is running on */
 	bitchunk_t cpu_mask[BITMAP_CHUNKS(CONFIG_MAX_CPUS)];
 
-	unsigned tickets;             /* 🎟 número de bilhetes (Lottery Scheduling) */
+	unsigned tickets; 
 } schedproc[NR_PROCS];
 
 /* Flag values */
