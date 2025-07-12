@@ -1799,61 +1799,60 @@ static struct proc * pick_proc(void)
   int processes_ready[7] = {0};
   int tickets_in_every_queue[7] = {0};
   int tickets = 0;
-  int chosen_ticket, acc_sum = 0, min_ticket_queue = 7;
+  int chosen_ticket, acc_sum = 0, min_ticket_queue = -1;
   int ticket;
 
   register struct proc *rp;
   struct proc **rdy_head = get_cpulocal_var(run_q_head);
+  struct proc **rdy_tail = get_cpulocal_var(run_q_tail);  // necessário para iterar dentro da fila
 
-  // Remover esse for — ele faz short-circuit no escalonador
-  /*
-  for (q=0; q < NR_SCHED_QUEUES; q++) {
-	if(q == 7) q += 8;
-	if(!(rp = rdy_head[q])) continue;
-	assert(proc_is_runnable(rp));
-	if (priv(rp)->s_flags & BILLABLE) get_cpulocal_var(bill_ptr) = rp;
-	return rp;
-  }
-  */
-
-  // Contar quantos processos prontos por prioridade (7 a 14)
+  // Verifica os processos prontos por prioridade (7 a 14)
   for (int i = 0; i <= NR_TASKS + NR_PROCS; i++) {
-	struct proc * process = &proc[i];
-	if (process->p_priority >= 7 && process->p_priority <= 14 && proc_is_runnable(process)) {
-		int idx = 7 - (process->p_priority - 7);
-		processes_ready[idx]++;
-	}
+    struct proc *process = &proc[i];
+    if (process->p_priority >= 7 && process->p_priority <= 14 && proc_is_runnable(process)) {
+      int idx = 7 - (process->p_priority - 7); // Mapear p_priority 7–14 para índices 0–7
+      processes_ready[idx]++;
+    }
   }
 
-  // Calcular número de tickets por fila
+  // Calcula os tickets por prioridade
   for (int q = 7; q < 15; q++) {
-	ticket = (16 - q) * processes_ready[7 - q];
-	tickets_in_every_queue[7 - q] = ticket;
-	tickets += ticket;
+    int idx = 7 - (q - 7); // Inverter o índice
+    ticket = (16 - q) * processes_ready[idx];
+    tickets_in_every_queue[idx] = ticket;
+    tickets += ticket;
   }
 
   if (tickets == 0) {
-	return NULL;
+    return NULL; // Nenhum processo pronto, sistema vai esperar
   }
 
   chosen_ticket = rand_c() % tickets + 1;
 
   for (int q = 7; q < 15; q++) {
-	ticket = tickets_in_every_queue[7 - q];
-	acc_sum += ticket;
-	if (chosen_ticket <= acc_sum) {
-		min_ticket_queue = q;
-		break;
-	}
+    int idx = 7 - (q - 7);
+    ticket = tickets_in_every_queue[idx];
+    acc_sum += ticket;
+    if (chosen_ticket <= acc_sum) {
+      min_ticket_queue = q;
+      break;
+    }
   }
 
+  if (min_ticket_queue == -1) return NULL;
+
+  // Agora que temos a fila, procuramos o primeiro processo válido nela
   rp = rdy_head[min_ticket_queue];
-  if (rp && proc_is_runnable(rp)) {
-	if (priv(rp)->s_flags & BILLABLE)
-		get_cpulocal_var(bill_ptr) = rp;
-	return rp;
+  while (rp != NULL) {
+    if (proc_is_runnable(rp)) {
+      if (priv(rp)->s_flags & BILLABLE)
+        get_cpulocal_var(bill_ptr) = rp;
+      return rp;
+    }
+    rp = rp->p_nextready;
   }
 
+  // Se mesmo assim não achamos, retorna NULL
   return NULL;
 }
 
