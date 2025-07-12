@@ -1796,77 +1796,64 @@ int rand_c(void)
  *===========================================================================*/
 static struct proc * pick_proc(void)
 {
-/* Decide who to run now.  A new process is selected and returned.
- * When a billable process is selected, record it in 'bill_ptr', so that the 
- * clock task can tell who to bill for system time.
- *
- * This function always uses the run queues of the local cpu!
- */
   int processes_ready[7] = {0};
   int tickets_in_every_queue[7] = {0};
-
   int tickets = 0;
-
   int chosen_ticket, acc_sum = 0, min_ticket_queue = 7;
-
   int ticket;
 
-  register struct proc *rp;			/* process to run */
-  struct proc **rdy_head;
-  int q;				/* iterate over queues */
+  register struct proc *rp;
+  struct proc **rdy_head = get_cpulocal_var(run_q_head);
 
-  /* Check each of the scheduling queues for ready processes. The number of
-   * queues is defined in proc.h, and priorities are set in the task table.
-   * If there are no processes ready to run, return NULL.
-   */
-  rdy_head = get_cpulocal_var(run_q_head);
+  // Remover esse for — ele faz short-circuit no escalonador
+  /*
   for (q=0; q < NR_SCHED_QUEUES; q++) {
-	if(q == 7) {
-		q += 8;
-	}
-	if(!(rp = rdy_head[q])) {
-		TRACE(VF_PICKPROC, printf("cpu %d queue %d empty\n", cpuid, q););
-		continue;
-	}
+	if(q == 7) q += 8;
+	if(!(rp = rdy_head[q])) continue;
 	assert(proc_is_runnable(rp));
-	if (priv(rp)->s_flags & BILLABLE)	 	
-		get_cpulocal_var(bill_ptr) = rp; /* bill for system time */
+	if (priv(rp)->s_flags & BILLABLE) get_cpulocal_var(bill_ptr) = rp;
 	return rp;
   }
+  */
 
+  // Contar quantos processos prontos por prioridade (7 a 14)
   for (int i = 0; i <= NR_TASKS + NR_PROCS; i++) {
-  	register struct proc * process = &proc[i];
-	if (process->p_priority <= 14 && process->p_priority >= 7){
-		const int priority_queue = process->p_priority;
-		if(proc_is_runnable(process)){
-			processes_ready[7-priority_queue]++;
-		}
+	struct proc * process = &proc[i];
+	if (process->p_priority >= 7 && process->p_priority <= 14 && proc_is_runnable(process)) {
+		int idx = 7 - (process->p_priority - 7);
+		processes_ready[idx]++;
 	}
   }
 
-  for (q = 7; q < 15; q++) {
-  	ticket = (16-q) * processes_ready[7-q];
-	tickets_in_every_queue[7-q] = ticket;
+  // Calcular número de tickets por fila
+  for (int q = 7; q < 15; q++) {
+	ticket = (16 - q) * processes_ready[7 - q];
+	tickets_in_every_queue[7 - q] = ticket;
 	tickets += ticket;
+  }
+
+  if (tickets == 0) {
+	return NULL;
   }
 
   chosen_ticket = rand_c() % tickets + 1;
 
-  for (q = 7; q < 15; q++){
-	  ticket = tickets_in_every_queue[7-q];
-	  acc_sum += ticket;
-	  if (chosen_ticket <= acc_sum) {
-		  min_ticket_queue = q;
-		  break;
-	  }
+  for (int q = 7; q < 15; q++) {
+	ticket = tickets_in_every_queue[7 - q];
+	acc_sum += ticket;
+	if (chosen_ticket <= acc_sum) {
+		min_ticket_queue = q;
+		break;
+	}
   }
 
-  if ((rp = rdy_head[min_ticket_queue]) && proc_is_runnable(rp)){
-	  if(priv(rp)->s_flags & BILLABLE){
-	  	get_cpulocal_var(bill_ptr) = rp;
-	  }
-	  return rp;
+  rp = rdy_head[min_ticket_queue];
+  if (rp && proc_is_runnable(rp)) {
+	if (priv(rp)->s_flags & BILLABLE)
+		get_cpulocal_var(bill_ptr) = rp;
+	return rp;
   }
+
   return NULL;
 }
 
