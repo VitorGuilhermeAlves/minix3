@@ -1835,7 +1835,7 @@ static struct proc * pick_proc(void)
   }
 
   for (int i = 0; i <= NR_TASKS + NR_PROCS; i++) {
-  	register struct proc * process = proc[i];
+  	register struct proc * process = &proc[i];
 	if (process->p_priority <= 14 && process->p_priority >= 7){
 		const int priority_queue = process->p_priority;
 		if(proc_is_runnable(process)){
@@ -1862,7 +1862,7 @@ static struct proc * pick_proc(void)
   }
 
   if ((rp = rdy_head[min_ticket_queue]) && proc_is_runnable(rp)){
-	  if(priv(rp)->s_flags & BILLABE){
+	  if(priv(rp)->s_flags & BILLABLE){
 	  	get_cpulocal_var(bill_ptr) = rp;
 	  }
 	  return rp;
